@@ -41,12 +41,20 @@ def content_filter(response: str) -> dict:
 
     # PII patterns to check
     PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
+        # Vietnamese phone number: 10-11 digits starting with 0
+        "VN_phone": r"0\d{9,10}",
+        # Email addresses
+        "email": r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}",
+        # National ID (CMND 9 digits / CCCD 12 digits)
+        "national_id": r"\b\d{9}\b|\b\d{12}\b",
+        # API key starting with sk-
+        "api_key": r"sk-[a-zA-Z0-9_-]+",
+        # Password patterns like password=xxx or password: xxx
+        "password": r"password\s*[:=]\s*\S+",
+        # Database connection strings
+        "db_connection": r"[a-z]+://[\w.@:/\-]+\.internal[\w/]*",
+        # Credit card numbers (basic Luhn-structure: 13-16 digits)
+        "credit_card": r"\b(?:\d[ -]?){13,16}\b",
     }
 
     for name, pattern in PII_PATTERNS.items():
@@ -97,7 +105,11 @@ If UNSAFE, add a brief reason on the next line.
 #     instruction=SAFETY_JUDGE_INSTRUCTION,
 # )
 
-safety_judge_agent = None  # TODO: Replace with implementation
+safety_judge_agent = llm_agent.LlmAgent(
+    model="gemini-2.0-flash",
+    name="safety_judge",
+    instruction=SAFETY_JUDGE_INSTRUCTION,
+)
 judge_runner = None
 
 
@@ -109,6 +121,7 @@ def _init_judge():
             agent=safety_judge_agent, app_name="safety_judge"
         )
 
+_init_judge()  # initialize after function is defined
 
 async def llm_safety_check(response_text: str) -> dict:
     """Use LLM judge to check if response is safe.
@@ -172,16 +185,31 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        # 1. Apply content filter (PII / secrets redaction)
+        filter_result = content_filter(response_text)
+        if not filter_result["safe"]:
+            self.redacted_count += 1
+            # Replace the response content with the redacted version
+            llm_response.content = types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=filter_result["redacted"])],
+            )
+            response_text = filter_result["redacted"]  # use redacted for judge
 
-        return llm_response  # TODO: modify if needed
+        # 2. LLM-as-Judge safety check (optional)
+        if self.use_llm_judge:
+            judge_result = await llm_safety_check(response_text)
+            if not judge_result["safe"]:
+                self.blocked_count += 1
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(
+                        text="I'm unable to provide that information as it may not meet our safety standards. "
+                             "Please contact VinBank support for further assistance."
+                    )],
+                )
+
+        return llm_response
 
 
 # ============================================================
