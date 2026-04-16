@@ -1,9 +1,13 @@
 """
 Lab 11 — Part 2B: Output Guardrails
   TODO 6: Content filter (PII, secrets)
-  TODO 7: LLM-as-Judge safety check
+  TODO 7: LLM-as-Judge safety check (multi-criteria)
   TODO 8: Output Guardrail Plugin (ADK)
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import re
 
 from google.genai import types
@@ -264,8 +268,4 @@ def test_content_filter():
 
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
     test_content_filter()
